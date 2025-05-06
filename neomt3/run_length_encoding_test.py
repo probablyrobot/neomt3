@@ -22,16 +22,16 @@ from absl.testing import absltest
 from neomt3 import event_codec, run_length_encoding
 
 codec = event_codec.Codec(
-    event_types=["pitch", "velocity", "drum", "program", "tie"],
+    event_types=["pitch", "velocity", "drum", "program", "tie", "shift"],
     event_ranges={
         "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
         "velocity": (0, 127),
         "drum": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
         "program": (note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM),
         "tie": (0, 0),
+        "shift": (0, 100),
     },
 )
-run_length_encode_shifts = run_length_encoding.run_length_encode_shifts_fn(codec=codec)
 
 
 class RunLengthEncodingTest(tf.test.TestCase):
@@ -52,37 +52,34 @@ class RunLengthEncodingTest(tf.test.TestCase):
             self.assertAllEqual(actual["targets"], expected["targets"])
 
     def test_run_length_encode_shifts(self):
-        og_dataset = tf.data.Dataset.from_tensors(
-            {"targets": [1, 1, 1, 161, 1, 1, 1, 162, 1, 1, 1]}
+        tokens = tf.constant([1, 1, 1, 161, 1, 1, 1, 162, 1, 1, 1])
+
+        result = run_length_encoding.run_length_encode_shifts(
+            tokens=tokens, codec=codec
         )
+        expected = tf.constant([3, 161, 6, 162])
 
-        result = run_length_encode_shifts(og_dataset)
-        expected = tf.data.Dataset.from_tensors({"targets": [3, 161, 6, 162]})
-
-        for actual, expected in zip(result, expected):
-            self.assertAllEqual(actual["targets"], expected["targets"])
+        self.assertAllEqual(result, expected)
 
     def test_run_length_encode_shifts_beyond_max_length(self):
-        og_dataset = tf.data.Dataset.from_tensors(
-            {"targets": [1] * 202 + [161, 1, 1, 1]}
+        tokens = tf.constant([1] * 202 + [161, 1, 1, 1])
+
+        result = run_length_encoding.run_length_encode_shifts(
+            tokens=tokens, codec=codec
         )
+        expected = tf.constant([100, 100, 2, 161])
 
-        result = run_length_encode_shifts(og_dataset)
-        expected = tf.data.Dataset.from_tensors({"targets": [100, 100, 2, 161]})
-
-        for actual, expected in zip(result, expected):
-            self.assertAllEqual(actual["targets"], expected["targets"])
+        self.assertAllEqual(result, expected)
 
     def test_run_length_encode_shifts_simultaneous(self):
-        og_dataset = tf.data.Dataset.from_tensors(
-            {"targets": [1, 1, 1, 161, 162, 1, 1, 1]}
+        tokens = tf.constant([1, 1, 1, 161, 162, 1, 1, 1])
+
+        result = run_length_encoding.run_length_encode_shifts(
+            tokens=tokens, codec=codec
         )
+        expected = tf.constant([3, 161, 162])
 
-        result = run_length_encode_shifts(og_dataset)
-        expected = tf.data.Dataset.from_tensors({"targets": [3, 161, 162]})
-
-        for actual, expected in zip(result, expected):
-            self.assertAllEqual(actual["targets"], expected["targets"])
+        self.assertAllEqual(result, expected)
 
     def test_merge_run_length_encoded_targets(self):
         # pylint: disable=bad-whitespace

@@ -122,41 +122,82 @@ def encode_events(events: List[Dict[str, Any]], codec: event_codec.Codec) -> tf.
 def decode_events(
     tokens: tf.Tensor,
     codec: event_codec.Codec,
-    vocab_config: vocabularies.VocabularyConfig,
-    frame_times: Optional[tf.Tensor] = None,
-    sequence_length: Optional[tf.Tensor] = None,
-) -> List[Dict[str, Any]]:
+    state: Optional[Any] = None,
+    start_time: float = 0.0,
+    max_time: Optional[float] = None,
+    decode_event_fn: Optional[Callable[[Any, float, Any, Any], None]] = None,
+) -> Tuple[int, int]:
     """Decode tokens to events.
 
     Args:
         tokens: Tensor of tokens
         codec: Event codec for decoding
-        vocab_config: Vocabulary configuration
-        frame_times: Optional frame times tensor
-        sequence_length: Optional sequence length tensor
+        state: Optional decoding state
+        start_time: Start time for decoding
+        max_time: Optional maximum time for decoding
+        decode_event_fn: Optional function to decode events
 
     Returns:
-        List of decoded events
+        Tuple of (invalid_ids, dropped_events)
     """
     # Convert to numpy for easier processing
-    tokens = tokens.numpy()
+    tokens = tokens.numpy() if isinstance(tokens, tf.Tensor) else tokens
 
-    # Truncate if sequence length is provided
-    if sequence_length is not None:
-        tokens = tokens[:sequence_length]
+    # Track statistics
+    invalid_ids = 0
+    dropped_events = 0
 
-    # Decode each token
-    events = []
+    # Process each token
+    current_time = start_time
     for token in tokens:
         event = codec.decode_event(token)
-        if event is not None:
-            events.append(event)
+        if event is None:
+            invalid_ids += 1
+            continue
 
-    return events
+        # Check if we've exceeded max time
+        if max_time is not None and current_time > max_time:
+            dropped_events += 1
+            continue
+
+        # Decode event if function provided
+        if decode_event_fn is not None:
+            decode_event_fn(state, current_time, event, codec)
+
+    return invalid_ids, dropped_events
 
 
-def run_length_encode_shifts(tokens: tf.Tensor, codec: event_codec.Codec) -> tf.Tensor:
-    """Run-length encode shift tokens.
+def merge_run_length_encoded_targets(
+    targets: np.ndarray,
+    codec: event_codec.Codec,
+) -> np.ndarray:
+    """Merge run-length encoded targets.
+
+    Args:
+        targets: Array of run-length encoded targets
+        codec: Event codec for encoding
+
+    Returns:
+        Array of merged targets
+    """
+    # Convert to list for easier manipulation
+    merged = []
+    for target in targets:
+        # Remove padding tokens
+        target = target[target != 0]
+        if not target.size:
+            continue
+        # Add non-padding tokens to merged list
+        merged.extend(target)
+
+    return np.array(merged, dtype=np.int32)
+
+
+def run_length_encode_shifts(
+    tokens: tf.Tensor,
+    codec: event_codec.Codec,
+) -> tf.Tensor:
+    """Run length encode shifts in a sequence of tokens.
 
     Args:
         tokens: Tensor of tokens
@@ -166,60 +207,173 @@ def run_length_encode_shifts(tokens: tf.Tensor, codec: event_codec.Codec) -> tf.
         Tensor of run-length encoded tokens
     """
     # Convert to numpy for easier processing
-    tokens = tokens.numpy()
+    tokens = tokens.numpy() if isinstance(tokens, tf.Tensor) else tokens
 
-    # Get shift token range
-    shift_start, shift_end = codec.event_type_range("shift")
+    # Initialize result list
+    result = []
+    current_count = 0
 
-    # Run-length encode shifts
-    encoded = []
-    i = 0
-    while i < len(tokens):
-        if shift_start <= tokens[i] <= shift_end:
-            # Count consecutive shifts
-            count = 1
-            while (
-                i + count < len(tokens)
-                and shift_start <= tokens[i + count] <= shift_end
-            ):
-                count += 1
-
-            # Add encoded shift
-            encoded.append(tokens[i] + count - 1)
-            i += count
+    # Process each token
+    for token in tokens:
+        if codec.is_shift_event_index(token):
+            current_count += 1
+            if current_count == codec.max_shift_steps:
+                result.append(current_count)
+                current_count = 0
         else:
-            # Add non-shift token
-            encoded.append(tokens[i])
-            i += 1
+            if current_count > 0:
+                result.append(current_count)
+                current_count = 0
+            result.append(token)
 
-    return tf.convert_to_tensor(encoded, dtype=tf.int32)
+    # Add any remaining count
+    if current_count > 0:
+        result.append(current_count)
+
+    return tf.convert_to_tensor(result, dtype=tf.int32)
 
 
-def run_length_decode_shifts(tokens: tf.Tensor, codec: event_codec.Codec) -> tf.Tensor:
-    """Run-length decode shift tokens.
+def run_length_decode_shifts(
+    tokens: tf.Tensor,
+    codec: event_codec.Codec,
+) -> tf.Tensor:
+    """Run length decode shifts in a sequence of tokens.
 
     Args:
-        tokens: Tensor of tokens
-        codec: Event codec for decoding
+        tokens: Tensor of run-length encoded tokens
+        codec: Event codec for encoding
 
     Returns:
-        Tensor of run-length decoded tokens
+        Tensor of decoded tokens
     """
     # Convert to numpy for easier processing
-    tokens = tokens.numpy()
+    tokens = tokens.numpy() if isinstance(tokens, tf.Tensor) else tokens
 
-    # Get shift token range
-    shift_start, shift_end = codec.event_type_range("shift")
+    # Initialize result list
+    result = []
 
-    # Run-length decode shifts
-    decoded = []
+    # Process each token
     for token in tokens:
-        if shift_start <= token <= shift_end:
-            # Decode shift
-            count = token - shift_start + 1
-            decoded.extend([shift_start] * count)
+        if codec.is_shift_event_index(token):
+            # This is a count of shift tokens
+            result.extend([1] * token)
         else:
-            # Add non-shift token
-            decoded.append(token)
+            # This is a non-shift token
+            result.append(token)
 
-    return tf.convert_to_tensor(decoded, dtype=tf.int32)
+    return tf.convert_to_tensor(result, dtype=tf.int32)
+
+
+def encode_and_index_events(
+    state: Optional[Any],
+    event_times: np.ndarray,
+    event_values: np.ndarray,
+    encode_event_fn: Callable[[Any, Any, Any], Sequence[Any]],
+    codec: event_codec.Codec,
+    frame_times: np.ndarray,
+    encoding_state_to_events_fn: Optional[Callable[[Any], Sequence[Any]]] = None,
+) -> Tuple[List[int], List[int], List[int], List[int], List[int]]:
+    """Encode events and index them to frames.
+
+    Args:
+        state: Optional encoding state
+        event_times: Array of event times
+        event_values: Array of event values
+        encode_event_fn: Function to encode events
+        codec: Event codec for encoding
+        frame_times: Array of frame times
+        encoding_state_to_events_fn: Optional function to convert encoding state to events
+
+    Returns:
+        Tuple of (event_indices, event_values, event_times, frame_indices, frame_times)
+    """
+    # Initialize lists to store results
+    event_indices = []
+    event_values_list = []
+    event_times_list = []
+    frame_indices = []
+    frame_times_list = []
+
+    # Process each event
+    for i, (time, value) in enumerate(zip(event_times, event_values)):
+        # Encode event
+        events = encode_event_fn(state, value, codec)
+        if not events:
+            continue
+
+        # Add events to lists
+        for event in events:
+            event_indices.append(i)
+            event_values_list.append(event.value)
+            event_times_list.append(time)
+
+    # Add state events if function provided
+    if state is not None and encoding_state_to_events_fn is not None:
+        state_events = encoding_state_to_events_fn(state)
+        for event in state_events:
+            event_indices.append(len(event_times))
+            event_values_list.append(event.value)
+            event_times_list.append(frame_times[-1])
+
+    # Index events to frames
+    event_times_array = np.array(event_times_list)
+    for i, frame_time in enumerate(frame_times):
+        # Find events that occur before or at this frame
+        event_mask = event_times_array <= frame_time
+        if not np.any(event_mask):
+            continue
+
+        # Add frame index and time
+        frame_indices.append(i)
+        frame_times_list.append(frame_time)
+
+    return (
+        event_indices,
+        event_values_list,
+        event_times_list,
+        frame_indices,
+        frame_times_list,
+    )
+
+
+def remove_redundant_state_changes_fn(
+    codec: event_codec.Codec,
+    state_change_event_types: List[str],
+) -> Callable[[tf.data.Dataset], tf.data.Dataset]:
+    """Create a function to remove redundant state changes.
+
+    Args:
+        codec: Event codec for encoding
+        state_change_event_types: List of event types that represent state changes
+
+    Returns:
+        Function that removes redundant state changes from a dataset
+    """
+
+    def _process(example):
+        tokens = example["targets"]
+        result = []
+        current_state = {}
+
+        for token in tokens:
+            event = codec.decode_event(token)
+            if event is None:
+                result.append(token)
+                continue
+
+            if event.type in state_change_event_types:
+                if (
+                    event.type not in current_state
+                    or current_state[event.type] != event.value
+                ):
+                    current_state[event.type] = event.value
+                    result.append(token)
+            else:
+                result.append(token)
+
+        return {"targets": tf.convert_to_tensor(result, dtype=tf.int32)}
+
+    def _remove_redundant_state_changes(dataset: tf.data.Dataset) -> tf.data.Dataset:
+        return dataset.map(_process)
+
+    return _remove_redundant_state_changes

@@ -213,90 +213,110 @@ def compute_metrics(
     target_sequence_length: Optional[tf.Tensor] = None,
     prediction_sequence_length: Optional[tf.Tensor] = None,
 ) -> Dict[str, tf.Tensor]:
-    """Compute metrics for transcription evaluation.
+    """Compute metrics for predictions and targets.
 
     Args:
-        predictions: Model predictions tensor
-        targets: Target tensor
+        predictions: Predicted tokens
+        targets: Target tokens
         codec: Event codec for decoding
         vocab_config: Vocabulary configuration
-        frame_times: Optional frame times tensor
-        target_sequence_length: Optional target sequence length tensor
-        prediction_sequence_length: Optional prediction sequence length tensor
+        frame_times: Optional frame times
+        target_sequence_length: Optional target sequence length
+        prediction_sequence_length: Optional prediction sequence length
 
     Returns:
-        Dictionary of metric names to metric values
+        Dictionary of metrics
     """
-    # Decode predictions and targets
-    pred_events = run_length_encoding.decode_events(
-        predictions,
-        codec,
-        vocab_config,
-        frame_times=frame_times,
-        sequence_length=prediction_sequence_length,
-    )
+    metrics = {}
 
-    target_events = run_length_encoding.decode_events(
-        targets,
-        codec,
-        vocab_config,
-        frame_times=frame_times,
-        sequence_length=target_sequence_length,
-    )
+    # Compute frame metrics if frame times are provided
+    if frame_times is not None:
+        frame_metrics = compute_frame_metrics(predictions, targets)
+        metrics.update(frame_metrics)
 
-    # Compute frame-level metrics
-    frame_metrics = compute_frame_metrics(predictions, targets)
+    # Convert tokens to events
+    pred_events = []
+    target_events = []
 
-    # Compute event-level metrics
+    for pred, target in zip(predictions, targets):
+        # Decode prediction tokens
+        pred_state = note_sequences.NoteDecodingState()
+        for token in pred:
+            if token == 0:  # padding token
+                continue
+            event = codec.decode_event(token)
+            if event is not None:
+                pred_events.append(
+                    {
+                        "type": event.type,
+                        "value": event.value,
+                        "time": pred_state.current_time,
+                    }
+                )
+                note_sequences.decode_note_event(
+                    pred_state, pred_state.current_time, event, codec
+                )
+
+        # Decode target tokens
+        target_state = note_sequences.NoteDecodingState()
+        for token in target:
+            if token == 0:  # padding token
+                continue
+            event = codec.decode_event(token)
+            if event is not None:
+                target_events.append(
+                    {
+                        "type": event.type,
+                        "value": event.value,
+                        "time": target_state.current_time,
+                    }
+                )
+                note_sequences.decode_note_event(
+                    target_state, target_state.current_time, event, codec
+                )
+
+    # Compute event metrics
     event_metrics = compute_event_metrics(pred_events, target_events)
-
-    # Combine metrics
-    metrics = {**frame_metrics, **event_metrics}
+    metrics.update(event_metrics)
 
     return metrics
 
 
 def compute_frame_metrics(
-    predictions: tf.Tensor, targets: tf.Tensor
+    predictions: tf.Tensor,
+    targets: tf.Tensor,
 ) -> Dict[str, tf.Tensor]:
     """Compute frame-level metrics.
 
     Args:
-        predictions: Model predictions tensor
-        targets: Target tensor
+        predictions: Predicted tokens
+        targets: Target tokens
 
     Returns:
-        Dictionary of frame-level metric names to metric values
+        Dictionary of frame metrics
     """
-    # Compute accuracy
-    accuracy = tf.reduce_mean(tf.cast(tf.equal(predictions, targets), tf.float32))
+    # Convert to numpy for sklearn metrics
+    predictions = predictions.numpy()
+    targets = targets.numpy()
 
-    # Compute per-class metrics
-    pred_one_hot = tf.one_hot(predictions, depth=tf.shape(predictions)[-1])
-    target_one_hot = tf.one_hot(targets, depth=tf.shape(targets)[-1])
-
-    # True positives, false positives, false negatives
-    tp = tf.reduce_sum(pred_one_hot * target_one_hot, axis=[0, 1])
-    fp = tf.reduce_sum(pred_one_hot * (1 - target_one_hot), axis=[0, 1])
-    fn = tf.reduce_sum((1 - pred_one_hot) * target_one_hot, axis=[0, 1])
-
-    # Precision and recall
-    precision = tp / (tp + fp + 1e-7)
-    recall = tp / (tp + fn + 1e-7)
-
-    # F1 score
-    f1 = 2 * precision * recall / (precision + recall + 1e-7)
+    # Compute precision, recall, and F1 score
+    precision, recall, f1, _ = sklearn.metrics.precision_recall_fscore_support(
+        targets.flatten(),
+        predictions.flatten(),
+        average="binary",
+        zero_division=0,
+    )
 
     return {
-        "frame_accuracy": accuracy,
-        "frame_precision": tf.reduce_mean(precision),
-        "frame_recall": tf.reduce_mean(recall),
-        "frame_f1": tf.reduce_mean(f1),
+        "frame_precision": tf.constant(precision, dtype=tf.float32),
+        "frame_recall": tf.constant(recall, dtype=tf.float32),
+        "frame_f1": tf.constant(f1, dtype=tf.float32),
     }
 
 
 def compute_event_metrics(
-    pred_events: List[Dict[str, Any]], target_events: List[Dict[str, Any]]
+    pred_events: List[Dict[str, Any]],
+    target_events: List[Dict[str, Any]],
 ) -> Dict[str, tf.Tensor]:
     """Compute event-level metrics.
 
@@ -305,22 +325,30 @@ def compute_event_metrics(
         target_events: List of target events
 
     Returns:
-        Dictionary of event-level metric names to metric values
+        Dictionary of event metrics
     """
-    # Convert events to sets for comparison
-    pred_set = set(tuple(e.items()) for e in pred_events)
-    target_set = set(tuple(e.items()) for e in target_events)
+    # Count matches
+    matches = 0
+    for pred_event in pred_events:
+        for target_event in target_events:
+            if (
+                pred_event["type"] == target_event["type"]
+                and pred_event["value"] == target_event["value"]
+                and abs(pred_event["time"] - target_event["time"])
+                < 0.05  # 50ms tolerance
+            ):
+                matches += 1
+                break
 
-    # Compute true positives, false positives, false negatives
-    tp = len(pred_set.intersection(target_set))
-    fp = len(pred_set - target_set)
-    fn = len(target_set - pred_set)
+    # Compute precision, recall, and F1 score
+    precision = matches / len(pred_events) if pred_events else 0.0
+    recall = matches / len(target_events) if target_events else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0
+    )
 
-    # Compute precision and recall
-    precision = tp / (tp + fp + 1e-7)
-    recall = tp / (tp + fn + 1e-7)
-
-    # Compute F1 score
-    f1 = 2 * precision * recall / (precision + recall + 1e-7)
-
-    return {"event_precision": precision, "event_recall": recall, "event_f1": f1}
+    return {
+        "event_precision": tf.constant(precision, dtype=tf.float32),
+        "event_recall": tf.constant(recall, dtype=tf.float32),
+        "event_f1": tf.constant(f1, dtype=tf.float32),
+    }

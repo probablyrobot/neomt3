@@ -26,9 +26,10 @@ class EventCodecTest(absltest.TestCase):
 
     def test_encode_decode(self):
         ec = event_codec.Codec(
+            event_types=["pitch", "shift"],
+            event_ranges={"pitch": (0, 127), "shift": (0, 100)},
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[EventRange("pitch", min_value=0, max_value=127)],
         )
         events = [
             Event(type="pitch", value=60),
@@ -36,16 +37,17 @@ class EventCodecTest(absltest.TestCase):
             Event(type="pitch", value=62),
         ]
         encoded = [ec.encode_event(e) for e in events]
-        self.assertSequenceEqual([161, 5, 163], encoded)
+        self.assertSequenceEqual([60, 5, 62], encoded)
 
-        decoded = [ec.decode_event_index(idx) for idx in encoded]
+        decoded = [ec.decode_event(idx) for idx in encoded]
         self.assertSequenceEqual(events, decoded)
 
     def test_shift_steps(self):
         ec = event_codec.Codec(
+            event_types=["pitch", "shift"],
+            event_ranges={"pitch": (0, 127), "shift": (0, 100)},
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[EventRange("pitch", min_value=0, max_value=127)],
         )
 
         self.assertEqual(100, ec.max_shift_steps)

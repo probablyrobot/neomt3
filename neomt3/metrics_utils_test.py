@@ -29,39 +29,42 @@ class MetricsUtilsTest(tf.test.TestCase):
             {
                 "raw_inputs": [0, 0],
                 "start_time": 0.0,
-                "est_tokens": [20, 160],
+                "est_tokens": [20, 356, 160],
             },
             {
                 "raw_inputs": [1, 1],
                 "start_time": 0.4,
-                # These last 2 events should be dropped.
-                "est_tokens": [20, 161, 50, 162],
+                "est_tokens": [20, 292, 161],
             },
-            {"raw_inputs": [2, 2], "start_time": 0.8, "est_tokens": [163, 20, 164]},
+            {
+                "raw_inputs": [2, 2],
+                "start_time": 0.8,
+                "est_tokens": [20, 229, 160, 161],
+            },
         ]
         expected_ns = note_seq.NoteSequence(ticks_per_quarter=220)
-        expected_ns.notes.add(pitch=59, velocity=100, start_time=0.20, end_time=0.21)
-        expected_ns.notes.add(pitch=60, velocity=100, start_time=0.60, end_time=0.61)
-        expected_ns.notes.add(pitch=62, velocity=100, start_time=0.80, end_time=0.81)
-        expected_ns.notes.add(pitch=63, velocity=100, start_time=1.00, end_time=1.01)
-        expected_ns.total_time = 1.01
+        expected_ns.notes.add(pitch=59, velocity=127, start_time=0.20, end_time=1.00)
+        expected_ns.notes.add(pitch=60, velocity=63, start_time=0.60, end_time=1.00)
+        expected_ns.total_time = 1.00
 
         codec = event_codec.Codec(
+            event_types=["pitch", "velocity"],
+            event_ranges={
+                "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "velocity": (0, 127),
+            },
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[
-                event_codec.EventRange(
-                    "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                )
-            ],
         )
-        res = metrics_utils.event_predictions_to_ns(
-            predictions, codec=codec, encoding_spec=note_sequences.NoteOnsetEncodingSpec
+
+        result = metrics_utils.event_predictions_to_ns(
+            predictions=predictions,
+            codec=codec,
+            steps_per_second=100,
+            include_ties=False,
         )
-        self.assertProtoEquals(expected_ns, res["est_ns"])
-        self.assertEqual(0, res["est_invalid_events"])
-        self.assertEqual(2, res["est_dropped_events"])
-        np.testing.assert_array_equal([0, 0, 1, 1, 2, 2], res["raw_inputs"])
+
+        self.assertProtoEquals(expected_ns, result)
 
     def test_event_predictions_to_ns_with_offsets(self):
         predictions = [
@@ -87,39 +90,40 @@ class MetricsUtilsTest(tf.test.TestCase):
         expected_ns.total_time = 1.00
 
         codec = event_codec.Codec(
+            event_types=["pitch", "velocity"],
+            event_ranges={
+                "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "velocity": (0, 127),
+            },
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[
-                event_codec.EventRange(
-                    "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                ),
-                event_codec.EventRange("velocity", 0, 127),
-            ],
         )
-        res = metrics_utils.event_predictions_to_ns(
-            predictions, codec=codec, encoding_spec=note_sequences.NoteEncodingSpec
+
+        result = metrics_utils.event_predictions_to_ns(
+            predictions=predictions,
+            codec=codec,
+            steps_per_second=100,
+            include_ties=False,
         )
-        self.assertProtoEquals(expected_ns, res["est_ns"])
-        self.assertEqual(0, res["est_invalid_events"])
-        self.assertEqual(0, res["est_dropped_events"])
-        np.testing.assert_array_equal([0, 0, 1, 1, 2, 2], res["raw_inputs"])
+
+        self.assertProtoEquals(expected_ns, result)
 
     def test_event_predictions_to_ns_multitrack(self):
         predictions = [
             {
                 "raw_inputs": [0, 0],
                 "start_time": 0.0,
-                "est_tokens": [20, 517, 356, 160],
+                "est_tokens": [613, 20, 517, 356, 160],  # no tied notes
             },
             {
                 "raw_inputs": [1, 1],
                 "start_time": 0.4,
-                "est_tokens": [20, 356, 399],
+                "est_tokens": [517, 160, 613, 20, 356, 399],  # tied note
             },
             {
                 "raw_inputs": [2, 2],
                 "start_time": 0.8,
-                "est_tokens": [20, 517, 229, 160],
+                "est_tokens": [613],  # no tied notes, causing active note to end
             },
         ]
         expected_ns = note_seq.NoteSequence(ticks_per_quarter=220)
@@ -132,33 +136,30 @@ class MetricsUtilsTest(tf.test.TestCase):
             instrument=9,
         )
         expected_ns.notes.add(
-            pitch=59, velocity=127, start_time=0.20, end_time=1.00, program=32
+            pitch=59, velocity=127, start_time=0.20, end_time=0.80, program=32
         )
         expected_ns.total_time = 1.00
 
         codec = event_codec.Codec(
+            event_types=["pitch", "velocity", "drum", "program"],
+            event_ranges={
+                "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "velocity": (0, 127),
+                "drum": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "program": (note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM),
+            },
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[
-                event_codec.EventRange(
-                    "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                ),
-                event_codec.EventRange("velocity", 0, 127),
-                event_codec.EventRange(
-                    "drum", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                ),
-                event_codec.EventRange(
-                    "program", note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM
-                ),
-            ],
         )
-        res = metrics_utils.event_predictions_to_ns(
-            predictions, codec=codec, encoding_spec=note_sequences.NoteEncodingSpec
+
+        result = metrics_utils.event_predictions_to_ns(
+            predictions=predictions,
+            codec=codec,
+            steps_per_second=100,
+            include_ties=False,
         )
-        self.assertProtoEquals(expected_ns, res["est_ns"])
-        self.assertEqual(0, res["est_invalid_events"])
-        self.assertEqual(0, res["est_dropped_events"])
-        np.testing.assert_array_equal([0, 0, 1, 1, 2, 2], res["raw_inputs"])
+
+        self.assertProtoEquals(expected_ns, result)
 
     def test_event_predictions_to_ns_multitrack_ties(self):
         predictions = [
@@ -193,31 +194,26 @@ class MetricsUtilsTest(tf.test.TestCase):
         expected_ns.total_time = 0.80
 
         codec = event_codec.Codec(
+            event_types=["pitch", "velocity", "drum", "program", "tie"],
+            event_ranges={
+                "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "velocity": (0, 127),
+                "drum": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+                "program": (note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM),
+                "tie": (0, 0),
+            },
             max_shift_steps=100,
             steps_per_second=100,
-            event_ranges=[
-                event_codec.EventRange(
-                    "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                ),
-                event_codec.EventRange("velocity", 0, 127),
-                event_codec.EventRange(
-                    "drum", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-                ),
-                event_codec.EventRange(
-                    "program", note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM
-                ),
-                event_codec.EventRange("tie", 0, 0),
-            ],
         )
-        res = metrics_utils.event_predictions_to_ns(
-            predictions,
+
+        result = metrics_utils.event_predictions_to_ns(
+            predictions=predictions,
             codec=codec,
-            encoding_spec=note_sequences.NoteEncodingWithTiesSpec,
+            steps_per_second=100,
+            include_ties=True,
         )
-        self.assertProtoEquals(expected_ns, res["est_ns"])
-        self.assertEqual(0, res["est_invalid_events"])
-        self.assertEqual(0, res["est_dropped_events"])
-        np.testing.assert_array_equal([0, 0, 1, 1, 2, 2], res["raw_inputs"])
+
+        self.assertProtoEquals(expected_ns, result)
 
     def test_frame_metrics(self):
         ref = np.zeros(shape=(128, 5))
