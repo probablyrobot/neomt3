@@ -16,84 +16,73 @@
 
 import note_seq
 import numpy as np
-import seqio
 import tensorflow as tf
 from absl.testing import absltest
 
 from neomt3 import event_codec, run_length_encoding
 
-assert_dataset = seqio.test_utils.assert_dataset
 codec = event_codec.Codec(
-    max_shift_steps=100,
-    steps_per_second=100,
-    event_ranges=[
-        event_codec.EventRange(
-            "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-        ),
-        event_codec.EventRange("velocity", 0, 127),
-        event_codec.EventRange(
-            "drum", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-        ),
-        event_codec.EventRange(
-            "program", note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM
-        ),
-        event_codec.EventRange("tie", 0, 0),
-    ],
+    event_types=["pitch", "velocity", "drum", "program", "tie"],
+    event_ranges={
+        "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+        "velocity": (0, 127),
+        "drum": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+        "program": (note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM),
+        "tie": (0, 0),
+    },
 )
 run_length_encode_shifts = run_length_encoding.run_length_encode_shifts_fn(codec=codec)
 
 
 class RunLengthEncodingTest(tf.test.TestCase):
-
     def test_remove_redundant_state_changes(self):
         og_dataset = tf.data.Dataset.from_tensors(
             {"targets": [3, 525, 356, 161, 2, 525, 356, 161, 355, 394]}
         )
 
-        assert_dataset(
-            run_length_encoding.remove_redundant_state_changes_fn(
-                codec=codec, state_change_event_types=["velocity", "program"]
-            )(og_dataset),
-            {
-                "targets": [3, 525, 356, 161, 2, 161, 355, 394],
-            },
+        result = run_length_encoding.remove_redundant_state_changes_fn(
+            codec=codec, state_change_event_types=["velocity", "program"]
+        )(og_dataset)
+
+        expected = tf.data.Dataset.from_tensors(
+            {"targets": [3, 525, 356, 161, 2, 161, 355, 394]}
         )
+
+        for actual, expected in zip(result, expected):
+            self.assertAllEqual(actual["targets"], expected["targets"])
 
     def test_run_length_encode_shifts(self):
         og_dataset = tf.data.Dataset.from_tensors(
             {"targets": [1, 1, 1, 161, 1, 1, 1, 162, 1, 1, 1]}
         )
 
-        assert_dataset(
-            run_length_encode_shifts(og_dataset),
-            {
-                "targets": [3, 161, 6, 162],
-            },
-        )
+        result = run_length_encode_shifts(og_dataset)
+        expected = tf.data.Dataset.from_tensors({"targets": [3, 161, 6, 162]})
+
+        for actual, expected in zip(result, expected):
+            self.assertAllEqual(actual["targets"], expected["targets"])
 
     def test_run_length_encode_shifts_beyond_max_length(self):
         og_dataset = tf.data.Dataset.from_tensors(
             {"targets": [1] * 202 + [161, 1, 1, 1]}
         )
 
-        assert_dataset(
-            run_length_encode_shifts(og_dataset),
-            {
-                "targets": [100, 100, 2, 161],
-            },
-        )
+        result = run_length_encode_shifts(og_dataset)
+        expected = tf.data.Dataset.from_tensors({"targets": [100, 100, 2, 161]})
+
+        for actual, expected in zip(result, expected):
+            self.assertAllEqual(actual["targets"], expected["targets"])
 
     def test_run_length_encode_shifts_simultaneous(self):
         og_dataset = tf.data.Dataset.from_tensors(
             {"targets": [1, 1, 1, 161, 162, 1, 1, 1]}
         )
 
-        assert_dataset(
-            run_length_encode_shifts(og_dataset),
-            {
-                "targets": [3, 161, 162],
-            },
-        )
+        result = run_length_encode_shifts(og_dataset)
+        expected = tf.data.Dataset.from_tensors({"targets": [3, 161, 162]})
+
+        for actual, expected in zip(result, expected):
+            self.assertAllEqual(actual["targets"], expected["targets"])
 
     def test_merge_run_length_encoded_targets(self):
         # pylint: disable=bad-whitespace

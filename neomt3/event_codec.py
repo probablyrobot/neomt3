@@ -26,6 +26,21 @@ class Event:
     value: int
 
 
+@dataclasses.dataclass
+class EventRange:
+    """Event range class for defining valid ranges of event values."""
+
+    min_value: int
+    max_value: int
+
+    def __post_init__(self):
+        """Validate the range."""
+        if self.min_value > self.max_value:
+            raise ValueError(
+                f"min_value ({self.min_value}) must be less than or equal to max_value ({self.max_value})"
+            )
+
+
 class Codec:
     """Event codec for encoding and decoding events."""
 

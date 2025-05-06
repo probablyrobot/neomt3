@@ -21,21 +21,14 @@ import tensorflow as tf
 from neomt3 import event_codec, note_sequences, run_length_encoding
 
 codec = event_codec.Codec(
-    max_shift_steps=100,
-    steps_per_second=100,
-    event_ranges=[
-        event_codec.EventRange(
-            "pitch", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-        ),
-        event_codec.EventRange("velocity", 0, 127),
-        event_codec.EventRange(
-            "drum", note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH
-        ),
-        event_codec.EventRange(
-            "program", note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM
-        ),
-        event_codec.EventRange("tie", 0, 0),
-    ],
+    event_types=["pitch", "velocity", "drum", "program", "tie"],
+    event_ranges={
+        "pitch": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+        "velocity": (0, 127),
+        "drum": (note_seq.MIN_MIDI_PITCH, note_seq.MAX_MIDI_PITCH),
+        "program": (note_seq.MIN_MIDI_PROGRAM, note_seq.MAX_MIDI_PROGRAM),
+        "tie": (0, 0),
+    },
 )
 
 
