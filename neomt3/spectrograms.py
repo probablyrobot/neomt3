@@ -63,6 +63,9 @@ def compute_spectrogram(audio: tf.Tensor, config: SpectrogramConfig) -> tf.Tenso
     # Compute magnitude spectrogram
     magnitude_spectrograms = tf.abs(stft)
 
+    # Add small value to avoid log of zero
+    magnitude_spectrograms = tf.maximum(magnitude_spectrograms, config.clip_min_value)
+
     # Create mel filterbank matrix
     num_spectrogram_bins = magnitude_spectrograms.shape[-1]
     linear_to_mel_weight_matrix = tf.signal.linear_to_mel_weight_matrix(
@@ -77,9 +80,6 @@ def compute_spectrogram(audio: tf.Tensor, config: SpectrogramConfig) -> tf.Tenso
     mel_spectrograms = tf.tensordot(
         magnitude_spectrograms, linear_to_mel_weight_matrix, 1
     )
-
-    # Add small value to avoid log of zero
-    mel_spectrograms = tf.maximum(mel_spectrograms, config.clip_min_value)
 
     # Convert to log scale
     log_mel_spectrograms = tf.math.log(mel_spectrograms)
