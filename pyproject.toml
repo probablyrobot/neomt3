@@ -38,8 +38,8 @@ transformers = {extras = ["torch"], version = "^4.37.2"}
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
 black = "^25.1.0"
-isort = "^5.13.2"
-pre-commit = "^3.6.0"
+isort = "^6.0.1"
+pre-commit = "^4.2.0"
 
 [tool.poetry.urls]
 Homepage = "http://github.com/magenta/neomt3"
