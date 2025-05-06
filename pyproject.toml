@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "neomt3"
+version = "0.1.0"
+description = "Multi-Task Multitrack Music Transcription"
+authors = ["Google Inc. <no-reply@google.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+packages = [{include = "neomt3"}]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+absl-py = "^2.0.0"
+flax = "^0.8.0"
+gin-config = "^0.5.0"
+immutabledict = "^4.0.0"
+jax = "0.4.20"
+jaxlib = "0.4.20"
+librosa = "^0.10.1"
+matplotlib = "^3.8.3"
+mir_eval = "^0.7"
+note-seq = {git = "https://github.com/magenta/note-seq.git"}
+numpy = ">=1.26"
+pretty_midi = "^0.2.10"
+protobuf = "^4.25.2"
+scikit-learn = "^1.4.0"
+scipy = "^1.12.0"
+tensorflow = "2.16.2"
+tensorflow-datasets = "^4.9.4"
+transformers = {extras = ["torch"], version = "^4.37.2"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+
+[tool.poetry.urls]
+Homepage = "http://github.com/magenta/neomt3"
+Repository = "http://github.com/magenta/neomt3"
+
+[tool.poetry.scripts]
+neomt3 = "neomt3.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"] 

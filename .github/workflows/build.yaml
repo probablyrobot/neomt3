@@ -25,19 +25,20 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: '3.11.x'
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
     - name: Install dependencies
       run: |
         sudo apt-get -y install libsndfile1-dev
-        pip install pytest
-        git clone --branch=main https://github.com/google-research/t5x
-        cd t5x
-        python3 -m pip install -e . -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-        cd ..
-        pip install -e .
+        poetry install
     - name: Test with pytest
       # TODO(adarob): Re-enable once tests are updated.
       run: |
-        pytest mt3/
+        poetry run pytest neomt3/
     # The below step just reports the success or failure of tests as a "commit status".
     # This is needed for copybara integration.
     - name: Report success or failure as github status
