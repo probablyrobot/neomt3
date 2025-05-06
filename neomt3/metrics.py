@@ -14,16 +14,18 @@
 
 """Metrics computation for MT3."""
 
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, List
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
-from neomt3 import event_codec
-from neomt3 import spectrograms
-from neomt3 import vocabularies
-from neomt3 import run_length_encoding
-from neomt3 import metrics_utils
+from neomt3 import (
+    event_codec,
+    metrics_utils,
+    run_length_encoding,
+    spectrograms,
+    vocabularies,
+)
 
 
 def compute_transcription_metrics(
@@ -37,10 +39,10 @@ def compute_transcription_metrics(
     track_specs: Optional[Sequence[Any]] = None,
     frame_times: Optional[tf.Tensor] = None,
     target_sequence_length: Optional[tf.Tensor] = None,
-    prediction_sequence_length: Optional[tf.Tensor] = None
+    prediction_sequence_length: Optional[tf.Tensor] = None,
 ) -> Dict[str, tf.Tensor]:
     """Compute metrics for transcription evaluation.
-    
+
     Args:
         predictions: Model predictions tensor
         targets: Target tensor
@@ -53,7 +55,7 @@ def compute_transcription_metrics(
         frame_times: Optional frame times tensor
         target_sequence_length: Optional target sequence length tensor
         prediction_sequence_length: Optional prediction sequence length tensor
-        
+
     Returns:
         Dictionary of metric names to metric values
     """
@@ -65,9 +67,9 @@ def compute_transcription_metrics(
         vocab_config=vocab_config,
         frame_times=frame_times,
         target_sequence_length=target_sequence_length,
-        prediction_sequence_length=prediction_sequence_length
+        prediction_sequence_length=prediction_sequence_length,
     )
-    
+
     # Add track-specific metrics if track specs are provided
     if track_specs:
         track_metrics = compute_track_metrics(
@@ -78,10 +80,10 @@ def compute_transcription_metrics(
             track_specs=track_specs,
             frame_times=frame_times,
             target_sequence_length=target_sequence_length,
-            prediction_sequence_length=prediction_sequence_length
+            prediction_sequence_length=prediction_sequence_length,
         )
         metrics.update(track_metrics)
-    
+
     return metrics
 
 
@@ -93,10 +95,10 @@ def compute_track_metrics(
     track_specs: Sequence[Any],
     frame_times: Optional[tf.Tensor] = None,
     target_sequence_length: Optional[tf.Tensor] = None,
-    prediction_sequence_length: Optional[tf.Tensor] = None
+    prediction_sequence_length: Optional[tf.Tensor] = None,
 ) -> Dict[str, tf.Tensor]:
     """Compute track-specific metrics.
-    
+
     Args:
         predictions: Model predictions tensor
         targets: Target tensor
@@ -106,7 +108,7 @@ def compute_track_metrics(
         frame_times: Optional frame times tensor
         target_sequence_length: Optional target sequence length tensor
         prediction_sequence_length: Optional prediction sequence length tensor
-        
+
     Returns:
         Dictionary of track-specific metric names to metric values
     """
@@ -116,65 +118,63 @@ def compute_track_metrics(
         codec,
         vocab_config,
         frame_times=frame_times,
-        sequence_length=prediction_sequence_length
+        sequence_length=prediction_sequence_length,
     )
-    
+
     target_events = run_length_encoding.decode_events(
         targets,
         codec,
         vocab_config,
         frame_times=frame_times,
-        sequence_length=target_sequence_length
+        sequence_length=target_sequence_length,
     )
-    
+
     # Group events by track
     pred_track_events = group_events_by_track(pred_events, track_specs)
     target_track_events = group_events_by_track(target_events, track_specs)
-    
+
     # Compute metrics for each track
     track_metrics = {}
     for track_spec in track_specs:
-        track_name = track_spec['name']
+        track_name = track_spec["name"]
         track_pred_events = pred_track_events.get(track_name, [])
         track_target_events = target_track_events.get(track_name, [])
-        
+
         # Compute track-specific metrics
         track_metric = metrics_utils.compute_event_metrics(
-            track_pred_events,
-            track_target_events
+            track_pred_events, track_target_events
         )
-        
+
         # Add track name prefix to metric names
         for metric_name, metric_value in track_metric.items():
-            track_metrics[f'{track_name}_{metric_name}'] = metric_value
-    
+            track_metrics[f"{track_name}_{metric_name}"] = metric_value
+
     return track_metrics
 
 
 def group_events_by_track(
-    events: List[Dict[str, Any]],
-    track_specs: Sequence[Any]
+    events: List[Dict[str, Any]], track_specs: Sequence[Any]
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Group events by track.
-    
+
     Args:
         events: List of events
         track_specs: Track specifications
-        
+
     Returns:
         Dictionary mapping track names to lists of events
     """
     track_events = {}
-    
+
     for event in events:
         # Get track name from event
-        track_name = event.get('track_name')
+        track_name = event.get("track_name")
         if track_name is None:
             continue
-        
+
         # Add event to track
         if track_name not in track_events:
             track_events[track_name] = []
         track_events[track_name].append(event)
-    
+
     return track_events

@@ -17,15 +17,15 @@
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 import gin
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 from transformers import PreTrainedTokenizer
 
-from neomt3 import event_codec
-from neomt3 import run_length_encoding
+from neomt3 import event_codec, run_length_encoding
 
 # Default shuffle buffer size
 SHUFFLE_BUFFER_SIZE = 10000
+
 
 @gin.configurable
 def mix_transcription_examples(
@@ -33,97 +33,98 @@ def mix_transcription_examples(
     sequence_length: Dict[str, int],
     output_features: Dict[str, Any],
     codec: event_codec.Codec,
-    inputs_feature_key: str = 'inputs',
-    targets_feature_keys: Sequence[str] = ('targets',),
+    inputs_feature_key: str = "inputs",
+    targets_feature_keys: Sequence[str] = ("targets",),
     max_examples_per_mix: Optional[int] = None,
-    shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE
+    shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE,
 ) -> Callable[..., tf.data.Dataset]:
-  """Preprocessor that mixes together "batches" of transcription examples.
+    """Preprocessor that mixes together "batches" of transcription examples.
 
-  Args:
-    ds: Dataset of individual transcription examples, each of which should
-        have an 'inputs' field containing 1D audio samples (currently only
-        audio encoders that use raw samples as an intermediate representation
-        are supported), and a 'targets' field containing run-length encoded
-        note events.
-    sequence_length: Dictionary mapping feature key to length.
-    output_features: Dictionary mapping feature key to spec.
-    codec: An event_codec.Codec used to interpret the target events.
-    inputs_feature_key: Feature key for inputs which will be mixed as audio.
-    targets_feature_keys: List of feature keys for targets, each of which will
-        be merged (separately) as run-length encoded note events.
-    max_examples_per_mix: Maximum number of individual examples to mix together.
-    shuffle_buffer_size: Size of shuffle buffer to use for shuffle prior to
-        mixing.
+    Args:
+      ds: Dataset of individual transcription examples, each of which should
+          have an 'inputs' field containing 1D audio samples (currently only
+          audio encoders that use raw samples as an intermediate representation
+          are supported), and a 'targets' field containing run-length encoded
+          note events.
+      sequence_length: Dictionary mapping feature key to length.
+      output_features: Dictionary mapping feature key to spec.
+      codec: An event_codec.Codec used to interpret the target events.
+      inputs_feature_key: Feature key for inputs which will be mixed as audio.
+      targets_feature_keys: List of feature keys for targets, each of which will
+          be merged (separately) as run-length encoded note events.
+      max_examples_per_mix: Maximum number of individual examples to mix together.
+      shuffle_buffer_size: Size of shuffle buffer to use for shuffle prior to
+          mixing.
 
-  Returns:
-    Dataset containing mixed examples.
-  """
-  if max_examples_per_mix is None:
+    Returns:
+      Dataset containing mixed examples.
+    """
+    if max_examples_per_mix is None:
+        return ds
+
+    # TODO(iansimon): is there a way to use seqio's seed?
+    ds = tf.data.Dataset.sample_from_datasets(
+        [
+            ds.shuffle(
+                buffer_size=shuffle_buffer_size // max_examples_per_mix
+            ).padded_batch(batch_size=i)
+            for i in range(1, max_examples_per_mix + 1)
+        ]
+    )
+
+    def mix_inputs(ex):
+        samples = tf.reduce_sum(ex[inputs_feature_key], axis=0)
+        norm = tf.linalg.norm(samples, ord=np.inf)
+        ex[inputs_feature_key] = tf.math.divide_no_nan(samples, norm)
+        return ex
+
+    ds = ds.map(mix_inputs, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    max_tokens = sequence_length["targets"]
+    if output_features["targets"].add_eos:
+        # Leave room to insert an EOS token.
+        max_tokens -= 1
+
+    def mix_targets(ex):
+        for k in targets_feature_keys:
+            ex[k] = run_length_encoding.merge_run_length_encoded_targets(
+                targets=ex[k], codec=codec
+            )
+        return ex
+
+    ds = ds.map(mix_targets, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
     return ds
 
-  # TODO(iansimon): is there a way to use seqio's seed?
-  ds = tf.data.Dataset.sample_from_datasets([
-      ds.shuffle(
-          buffer_size=shuffle_buffer_size // max_examples_per_mix
-      ).padded_batch(batch_size=i) for i in range(1, max_examples_per_mix + 1)
-  ])
-
-  def mix_inputs(ex):
-    samples = tf.reduce_sum(ex[inputs_feature_key], axis=0)
-    norm = tf.linalg.norm(samples, ord=np.inf)
-    ex[inputs_feature_key] = tf.math.divide_no_nan(samples, norm)
-    return ex
-  ds = ds.map(mix_inputs, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-  max_tokens = sequence_length['targets']
-  if output_features['targets'].add_eos:
-    # Leave room to insert an EOS token.
-    max_tokens -= 1
-
-  def mix_targets(ex):
-    for k in targets_feature_keys:
-      ex[k] = run_length_encoding.merge_run_length_encoded_targets(
-          targets=ex[k],
-          codec=codec)
-    return ex
-  ds = ds.map(mix_targets, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-  return ds
 
 def mix_datasets(
     datasets: Sequence[tf.data.Dataset],
     weights: Optional[Sequence[float]] = None,
-    shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE
+    shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE,
 ) -> tf.data.Dataset:
     """Mix multiple datasets with optional weights.
-    
+
     Args:
         datasets: List of datasets to mix
         weights: Optional weights for each dataset
         shuffle_buffer_size: Size of shuffle buffer
-        
+
     Returns:
         Mixed dataset
     """
     if weights is None:
         weights = [1.0] * len(datasets)
-    
+
     # Normalize weights
     weights = tf.constant(weights, dtype=tf.float32)
     weights = weights / tf.reduce_sum(weights)
-    
+
     # Create choice dataset
     choice_dataset = tf.data.Dataset.from_tensor_slices(
-        tf.random.categorical(
-            tf.math.log([weights]),
-            num_samples=1,
-            dtype=tf.int32
-        )[0]
+        tf.random.categorical(tf.math.log([weights]), num_samples=1, dtype=tf.int32)[0]
     )
-    
+
     # Interleave datasets
-    return tf.data.Dataset.choose_from_datasets(
-        datasets,
-        choice_dataset
-    ).shuffle(shuffle_buffer_size)
+    return tf.data.Dataset.choose_from_datasets(datasets, choice_dataset).shuffle(
+        shuffle_buffer_size
+    )

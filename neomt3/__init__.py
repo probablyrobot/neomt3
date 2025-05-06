@@ -14,20 +14,21 @@
 
 """Base module for MT3."""
 
-from neomt3 import datasets
-from neomt3 import event_codec
-from neomt3 import inference
-from neomt3 import layers
-from neomt3 import metrics
-from neomt3 import metrics_utils
-from neomt3 import models
-from neomt3 import network
-from neomt3 import note_sequences
-from neomt3 import preprocessors
-from neomt3 import run_length_encoding
-from neomt3 import spectrograms
-from neomt3 import summaries
-from neomt3 import tasks
-from neomt3 import vocabularies
-
+from neomt3 import (
+    datasets,
+    event_codec,
+    inference,
+    layers,
+    metrics,
+    metrics_utils,
+    models,
+    network,
+    note_sequences,
+    preprocessors,
+    run_length_encoding,
+    spectrograms,
+    summaries,
+    tasks,
+    vocabularies,
+)
 from neomt3.version import __version__

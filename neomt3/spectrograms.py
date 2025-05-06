@@ -14,17 +14,17 @@
 
 """Audio spectrogram functions."""
 
+import dataclasses
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
-import tensorflow as tf
 import numpy as np
-import dataclasses
+import tensorflow as tf
 
 
 @dataclasses.dataclass
 class SpectrogramConfig:
     """Configuration for spectrogram computation."""
-    
+
     sample_rate: int = 16000
     hop_width: int = 512
     num_mel_bins: int = 229
@@ -35,16 +35,13 @@ class SpectrogramConfig:
     clip_min_value: float = 1e-5
 
 
-def compute_spectrogram(
-    audio: tf.Tensor,
-    config: SpectrogramConfig
-) -> tf.Tensor:
+def compute_spectrogram(audio: tf.Tensor, config: SpectrogramConfig) -> tf.Tensor:
     """Compute mel spectrogram from audio.
-    
+
     Args:
         audio: Audio tensor of shape [samples]
         config: Spectrogram configuration
-        
+
     Returns:
         Mel spectrogram tensor of shape [frames, mel_bins]
     """
@@ -52,7 +49,7 @@ def compute_spectrogram(
     was_1d = len(audio.shape) == 1
     if was_1d:
         audio = audio[tf.newaxis, :]
-    
+
     # Compute STFT
     stft = tf.signal.stft(
         audio,
@@ -60,12 +57,12 @@ def compute_spectrogram(
         frame_step=config.hop_width,
         fft_length=config.fft_size,
         window_fn=tf.signal.hann_window,
-        pad_end=False  # Don't pad the end to get exact number of frames
+        pad_end=False,  # Don't pad the end to get exact number of frames
     )
-    
+
     # Compute magnitude spectrogram
     magnitude_spectrograms = tf.abs(stft)
-    
+
     # Create mel filterbank matrix
     num_spectrogram_bins = magnitude_spectrograms.shape[-1]
     linear_to_mel_weight_matrix = tf.signal.linear_to_mel_weight_matrix(
@@ -73,38 +70,35 @@ def compute_spectrogram(
         num_spectrogram_bins=num_spectrogram_bins,
         sample_rate=config.sample_rate,
         lower_edge_hertz=config.mel_min_hz,
-        upper_edge_hertz=config.mel_max_hz
+        upper_edge_hertz=config.mel_max_hz,
     )
-    
+
     # Apply mel filterbank
     mel_spectrograms = tf.tensordot(
-        magnitude_spectrograms, linear_to_mel_weight_matrix, 1)
-    
+        magnitude_spectrograms, linear_to_mel_weight_matrix, 1
+    )
+
     # Add small value to avoid log of zero
     mel_spectrograms = tf.maximum(mel_spectrograms, config.clip_min_value)
-    
+
     # Convert to log scale
     log_mel_spectrograms = tf.math.log(mel_spectrograms)
-    
+
     # Remove batch dimension if it was added
     if was_1d:
         log_mel_spectrograms = tf.squeeze(log_mel_spectrograms, axis=0)
-    
+
     return log_mel_spectrograms
 
 
-def compute_frame_times(
-    num_frames: int,
-    hop_width: int,
-    sample_rate: int
-) -> tf.Tensor:
+def compute_frame_times(num_frames: int, hop_width: int, sample_rate: int) -> tf.Tensor:
     """Compute frame times.
-    
+
     Args:
         num_frames: Number of frames
         hop_width: Hop width in samples
         sample_rate: Sample rate in Hz
-        
+
     Returns:
         Frame times tensor of shape [frames]
     """
@@ -112,32 +106,30 @@ def compute_frame_times(
 
 
 def flatten_frames(
-    frames: tf.Tensor,
-    frame_times: tf.Tensor,
-    frame_size: int
+    frames: tf.Tensor, frame_times: tf.Tensor, frame_size: int
 ) -> Tuple[tf.Tensor, tf.Tensor]:
     """Flatten frames into samples.
-    
+
     Args:
         frames: Frames tensor of shape [frames, features]
         frame_times: Frame times tensor of shape [frames]
         frame_size: Frame size in samples
-        
+
     Returns:
         Tuple of (samples, sample_times) tensors
     """
     # Get shapes
     num_frames = tf.shape(frames)[0]
     num_features = tf.shape(frames)[1]
-    
+
     # Create sample times
     sample_times = tf.range(num_frames * frame_size, dtype=tf.float32)
-    
+
     # Repeat frames
     samples = tf.repeat(frames, frame_size, axis=0)
-    
+
     return samples, sample_times
 
 
 def input_depth(spectrogram_config):
-  return spectrogram_config.num_mel_bins
+    return spectrogram_config.num_mel_bins

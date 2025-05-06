@@ -16,30 +16,31 @@
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
-from neomt3 import event_codec
-from neomt3 import vocabularies
+from neomt3 import event_codec, vocabularies
 
 
 class EventEncodingSpec:
     """Base class for event encoding specifications."""
-    
-    def __init__(self, 
-                 num_velocity_bins: int = 32,
-                 max_shift_steps: int = 100,
-                 use_program_tokens: bool = True,
-                 use_velocity_tokens: bool = True,
-                 init_encoding_state_fn: Optional[Callable[[], Any]] = None,
-                 encode_event_fn: Optional[Callable[[Any, Any, Any], Sequence[Any]]] = None,
-                 encoding_state_to_events_fn: Optional[Callable[[Any], Sequence[Any]]] = None,
-                 init_decoding_state_fn: Optional[Callable[[], Any]] = None,
-                 begin_decoding_segment_fn: Optional[Callable[[Any], None]] = None,
-                 decode_event_fn: Optional[Callable[[Any, float, Any, Any], None]] = None,
-                 flush_decoding_state_fn: Optional[Callable[[Any], Any]] = None):
+
+    def __init__(
+        self,
+        num_velocity_bins: int = 32,
+        max_shift_steps: int = 100,
+        use_program_tokens: bool = True,
+        use_velocity_tokens: bool = True,
+        init_encoding_state_fn: Optional[Callable[[], Any]] = None,
+        encode_event_fn: Optional[Callable[[Any, Any, Any], Sequence[Any]]] = None,
+        encoding_state_to_events_fn: Optional[Callable[[Any], Sequence[Any]]] = None,
+        init_decoding_state_fn: Optional[Callable[[], Any]] = None,
+        begin_decoding_segment_fn: Optional[Callable[[Any], None]] = None,
+        decode_event_fn: Optional[Callable[[Any, float, Any, Any], None]] = None,
+        flush_decoding_state_fn: Optional[Callable[[Any], Any]] = None,
+    ):
         """Initialize the event encoding specification.
-        
+
         Args:
             num_velocity_bins: Number of velocity bins
             max_shift_steps: Maximum number of shift steps
@@ -64,51 +65,48 @@ class EventEncodingSpec:
         self.begin_decoding_segment_fn = begin_decoding_segment_fn
         self.decode_event_fn = decode_event_fn
         self.flush_decoding_state_fn = flush_decoding_state_fn
-        
+
     def encode_event(self, event: Dict[str, Any]) -> int:
         """Encode an event to a token.
-        
+
         Args:
             event: Event dictionary
-            
+
         Returns:
             Token ID
         """
         raise NotImplementedError
-        
+
     def decode_event(self, token: int) -> Optional[Dict[str, Any]]:
         """Decode a token to an event.
-        
+
         Args:
             token: Token ID
-            
+
         Returns:
             Event dictionary or None for special tokens
         """
         raise NotImplementedError
-        
+
     def event_type_range(self, event_type: str) -> Tuple[int, int]:
         """Get the token range for an event type.
-        
+
         Args:
             event_type: Event type string
-            
+
         Returns:
             Tuple of (start_id, end_id) for the token range
         """
         raise NotImplementedError
 
 
-def encode_events(
-    events: List[Dict[str, Any]],
-    codec: event_codec.Codec
-) -> tf.Tensor:
+def encode_events(events: List[Dict[str, Any]], codec: event_codec.Codec) -> tf.Tensor:
     """Encode events to tokens.
-    
+
     Args:
         events: List of events
         codec: Event codec for encoding
-        
+
     Returns:
         Tensor of encoded tokens
     """
@@ -117,7 +115,7 @@ def encode_events(
     for event in events:
         token = codec.encode_event(event)
         tokens.append(token)
-    
+
     return tf.convert_to_tensor(tokens, dtype=tf.int32)
 
 
@@ -126,56 +124,53 @@ def decode_events(
     codec: event_codec.Codec,
     vocab_config: vocabularies.VocabularyConfig,
     frame_times: Optional[tf.Tensor] = None,
-    sequence_length: Optional[tf.Tensor] = None
+    sequence_length: Optional[tf.Tensor] = None,
 ) -> List[Dict[str, Any]]:
     """Decode tokens to events.
-    
+
     Args:
         tokens: Tensor of tokens
         codec: Event codec for decoding
         vocab_config: Vocabulary configuration
         frame_times: Optional frame times tensor
         sequence_length: Optional sequence length tensor
-        
+
     Returns:
         List of decoded events
     """
     # Convert to numpy for easier processing
     tokens = tokens.numpy()
-    
+
     # Truncate if sequence length is provided
     if sequence_length is not None:
         tokens = tokens[:sequence_length]
-    
+
     # Decode each token
     events = []
     for token in tokens:
         event = codec.decode_event(token)
         if event is not None:
             events.append(event)
-    
+
     return events
 
 
-def run_length_encode_shifts(
-    tokens: tf.Tensor,
-    codec: event_codec.Codec
-) -> tf.Tensor:
+def run_length_encode_shifts(tokens: tf.Tensor, codec: event_codec.Codec) -> tf.Tensor:
     """Run-length encode shift tokens.
-    
+
     Args:
         tokens: Tensor of tokens
         codec: Event codec for encoding
-        
+
     Returns:
         Tensor of run-length encoded tokens
     """
     # Convert to numpy for easier processing
     tokens = tokens.numpy()
-    
+
     # Get shift token range
-    shift_start, shift_end = codec.event_type_range('shift')
-    
+    shift_start, shift_end = codec.event_type_range("shift")
+
     # Run-length encode shifts
     encoded = []
     i = 0
@@ -183,10 +178,12 @@ def run_length_encode_shifts(
         if shift_start <= tokens[i] <= shift_end:
             # Count consecutive shifts
             count = 1
-            while (i + count < len(tokens) and
-                   shift_start <= tokens[i + count] <= shift_end):
+            while (
+                i + count < len(tokens)
+                and shift_start <= tokens[i + count] <= shift_end
+            ):
                 count += 1
-            
+
             # Add encoded shift
             encoded.append(tokens[i] + count - 1)
             i += count
@@ -194,29 +191,26 @@ def run_length_encode_shifts(
             # Add non-shift token
             encoded.append(tokens[i])
             i += 1
-    
+
     return tf.convert_to_tensor(encoded, dtype=tf.int32)
 
 
-def run_length_decode_shifts(
-    tokens: tf.Tensor,
-    codec: event_codec.Codec
-) -> tf.Tensor:
+def run_length_decode_shifts(tokens: tf.Tensor, codec: event_codec.Codec) -> tf.Tensor:
     """Run-length decode shift tokens.
-    
+
     Args:
         tokens: Tensor of tokens
         codec: Event codec for decoding
-        
+
     Returns:
         Tensor of run-length decoded tokens
     """
     # Convert to numpy for easier processing
     tokens = tokens.numpy()
-    
+
     # Get shift token range
-    shift_start, shift_end = codec.event_type_range('shift')
-    
+    shift_start, shift_end = codec.event_type_range("shift")
+
     # Run-length decode shifts
     decoded = []
     for token in tokens:
@@ -227,5 +221,5 @@ def run_length_decode_shifts(
         else:
             # Add non-shift token
             decoded.append(token)
-    
+
     return tf.convert_to_tensor(decoded, dtype=tf.int32)
