@@ -1,6 +1,24 @@
-# NeoMT3 Release Notes
+# Release Notes
 
-## Version 0.1.0 (May 2025)
+## Version 0.1.1 (2024-03-19)
+
+### Changes
+- Removed dependency on GitHub versions for better stability and reproducibility
+- Updated dependencies to use specific version numbers instead of GitHub references
+
+## Version 0.1.0 (2024-03-19)
+
+### Features
+- Initial release of the MT3 codebase
+- Implementation of core transcription functionality
+- Support for multiple instrument tracks
+- Integration with Music Transformer architecture
+
+### Technical Details
+- Python-based implementation
+- PyTorch backend
+- Comprehensive test suite
+- Documentation and examples
 
 ### Major Changes
 
@@ -41,4 +59,4 @@
 
 This is the first release of NeoMT3, a fork of the original MT3 project by Google Research, now maintained by Igor Bogicevic. The project continues to use the T5X framework for multi-instrument automatic music transcription, but with a modernized codebase and dependency structure.
 
-For issues and feedback, please use the [GitHub repository](https://github.com/probablyrobot/neomt3). 
+For issues and feedback, please use the [GitHub repository](https://github.com/probablyrobot/neomt3).

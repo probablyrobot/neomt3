@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "neomt3"
-version = "0.1.0"
+version = "0.1.1"
 description = "Multi-Task Multitrack Music Transcription"
 authors = ["Google Inc. <no-reply@google.com>"]
 license = "Apache-2.0"
