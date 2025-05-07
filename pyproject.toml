@@ -25,7 +25,7 @@ jaxlib = "0.4.20"
 librosa = "^0.10.1"
 matplotlib = "^3.8.3"
 mir_eval = "^0.7"
-note-seq = {git = "https://github.com/magenta/note-seq.git"}
+note-seq = "^0.0.5"
 numpy = ">=1.26"
 pretty_midi = "^0.2.10"
 protobuf = "^4.25.2"
